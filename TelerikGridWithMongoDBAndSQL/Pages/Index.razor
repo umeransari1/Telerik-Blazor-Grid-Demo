@@ -1,0 +1,154 @@
+﻿@page "/"
+
+@using Telerik.DataSource
+@using TelerikGridWithMongoDBAndSQL.Data;
+@using TelerikGridWithMongoDBAndSQL.Services;
+@using Telerik.DataSource.Extensions;
+@inject ICommonService CommonServiceObj
+
+<PageTitle>Index</PageTitle>
+
+<style>
+    .k-toolbar .k-button {
+        margin-right: 5px;
+    }
+
+    .d-none {
+        display: none;
+    }
+</style>
+
+<label>Is MongoDB Enabled </label><TelerikSwitch Class="float-right" @bind-Value="@iSMongoEnabled"></TelerikSwitch>
+<br/>
+<br/>
+
+@if(GridData!=null)
+{
+    <TelerikGrid TItem="@People" OnRead=@ReadItems @ref="@GridRef"
+                 Sortable="true"
+                 Height="480px" RowHeight="40"
+                 PageSize="@PageSize"
+                 FilterMode="@GridFilterMode.FilterMenu"
+                 ScrollMode="@GridScrollMode.Virtual"
+                 Reorderable="true" Resizable="true">
+
+        <GridToolBar>
+            <span class="k-toolbar-spacer"></span>
+            <GridCommandButton Command="MyToolbarCommand" IconClass="k-icon k-i-refresh" Class="k-refresh-btn" OnClick="@RebindGrid"></GridCommandButton>
+            <TelerikButton OnClick="@( _ => isModalVisible = true )" IconClass="k-icon k-i-align-justify"></TelerikButton>
+            <TelerikButton OnClick="@ExportGridAsync" IconClass="k-icon k-i-align-justify">Test Export</TelerikButton>
+            <GridCommandButton Command="ExcelExport" Icon="file-excel">Export to Excel</GridCommandButton>
+            <GridCommandButton Command="CsvExport" Icon="file-excel">Export to Csv</GridCommandButton>
+        </GridToolBar>
+        
+        <GridExport>
+            <GridExcelExport FileName="telerik-grid-export" AllPages="true" />
+            <GridCsvExport FileName="grid-export" AllPages="true" />
+        </GridExport>
+
+        <GridColumns>
+            @foreach (var col in columns)
+            {
+                <GridColumn Field="@col.Key" Width="120px" Visible="@col.Value" />
+            }
+        </GridColumns>
+    </TelerikGrid>
+}
+else
+{
+    <h3>Loading.....</h3>
+}
+
+<TelerikWindow Modal="true" @bind-Visible="@isModalVisible" Resizable="false">
+    <WindowTitle>
+        <strong>Column Chooser</strong>
+    </WindowTitle>
+    <WindowContent>
+        @foreach (var col in columns)
+        {
+            var id = $"{col.Key}";
+            <TelerikCheckBox Value="@col.Value" ValueChanged="@((bool value) => ValueChanged(col.Key, value))" Id="@id"></TelerikCheckBox>
+            <label for="@id">@col.Key</label><br/><br/>
+        }
+    </WindowContent>
+    <WindowActions>
+        <WindowAction Name="Close" />
+    </WindowActions>
+</TelerikWindow>
+
+@code {
+    public IEnumerable<People> GridData { get; set; }
+    public IDictionary<string, bool> columns { get; set; }
+    public int PageSize { get; set; } = 40;
+    public int Skip { get; set; } = 0;
+    TelerikGrid<People> GridRef { get; set; }
+    public bool isModalVisible { get; set; }
+    public bool isExportVisible { get; set; }
+    public Type TObj { get; set; }
+    List<string> Values { get; set; } = new List<string>();
+    public Common reader = new Common();
+    private bool iSMongoEnabled { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        GridData = new List<People>();
+        columns = reader.ProceesData(new People());
+    }
+
+    private async Task RebindGrid()
+    {
+        var state = new GridState<People>();
+        if (iSMongoEnabled)
+            GridData = await CommonServiceObj.GetPeopleFromMongoDB(Skip,PageSize, null); 
+        else
+            GridData = await CommonServiceObj.GetPeople(Skip,PageSize, "", "");
+
+        await GridRef.SetState(state);
+    }
+
+    private void ValueChanged(string key, bool value)
+    {
+        columns[key] = value;
+    }
+
+    protected async Task ReadItems(GridReadEventArgs args)
+    {
+        Skip = args.Request.Skip;
+
+        string where = "";
+        string sort = "";
+
+        if (iSMongoEnabled)
+        {
+            GridData = await CommonServiceObj.GetPeopleFromMongoDB(Skip, PageSize, args.Request);
+        }
+        else
+        {
+            if(args.Request.Filters.Any())
+            {
+                where = reader.DescriptorToSqlQuery(args.Request.Filters);
+                where = string.IsNullOrEmpty(where) ? "" : $"WHERE {where}";
+            }
+
+            if (args.Request.Sorts.Any())
+            {
+                foreach(var srt in args.Request.Sorts)
+                {
+                    string direction = srt.SortDirection == ListSortDirection.Ascending ? "ASC" : "DESC";
+                    sort += $" {srt.Member} {direction} , ";
+                }
+
+                sort = sort.TrimEnd().Trim(',');
+            }
+            GridData = await CommonServiceObj.GetPeople(Skip,PageSize, where, sort);
+        }
+
+        args.Data =  (GridData as List<People>).ToList();
+        args.Total = GridData.Count();
+    }
+
+    protected async Task ExportGridAsync()
+    {
+        GridRef.SaveAsExcelFileAsync();
+    }
+}
